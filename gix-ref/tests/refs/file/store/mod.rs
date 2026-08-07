@@ -213,6 +213,14 @@ fn precompose_unicode_journey() -> crate::Result {
     );
 
     let precomposed_u = "ü";
+    let update_at = |name: &str| {
+        let mut edit = create_at(name);
+        let Change::Update { expected, .. } = &mut edit.change else {
+            unreachable!("create helper always returns an update")
+        };
+        *expected = PreviousValue::Any;
+        edit
+    };
     for namespace in [decomposed_u, precomposed_u] {
         let mut store_precomposed_with_namespace = store_precomposed.clone();
         store_precomposed_with_namespace.namespace = Some(gix_ref::namespace::expand(namespace)?.clone());
@@ -221,7 +229,7 @@ fn precompose_unicode_journey() -> crate::Result {
         let edits = store_precomposed_with_namespace
             .transaction()
             .prepare(
-                [create_at(&format!("refs/heads/{decomposed_a}"))],
+                [update_at(&format!("refs/heads/{decomposed_a}"))],
                 Fail::Immediately,
                 Fail::Immediately,
             )?
@@ -254,7 +262,7 @@ fn precompose_unicode_journey() -> crate::Result {
                 Box::new(EmptyCommit),
             ))
             .prepare(
-                [create_at(&format!("refs/heads/{decomposed_u}"))],
+                [update_at(&format!("refs/heads/{decomposed_u}"))],
                 Fail::Immediately,
                 Fail::Immediately,
             )?

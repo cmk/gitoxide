@@ -155,14 +155,12 @@ impl Transaction<'_, '_> {
                         return Err(Error::MustExist { full_name, expected });
                     }
                     (PreviousValue::MustNotExist, Some(existing)) => {
-                        if existing.target != *new {
-                            let new = new.clone();
-                            return Err(Error::MustNotExist {
-                                full_name: change.name(),
-                                actual: existing.target.clone(),
-                                new,
-                            });
-                        }
+                        let new = new.clone();
+                        return Err(Error::MustNotExist {
+                            full_name: change.name(),
+                            actual: existing.target.clone(),
+                            new,
+                        });
                     }
                     (
                         PreviousValue::MustExistAndMatch(previous) | PreviousValue::ExistingMustMatch(previous),
@@ -256,6 +254,7 @@ impl Transaction<'_, '_> {
                 lock: None,
                 parent_index: None,
                 reflog_previous_oid: None,
+                force_reflog_update: false,
             })
             .collect();
         updates
@@ -272,6 +271,7 @@ impl Transaction<'_, '_> {
                     lock: None,
                     parent_index: Some(idx),
                     reflog_previous_oid: None,
+                    force_reflog_update: false,
                 },
             )
             .map_err(Error::PreprocessingFailed)?;

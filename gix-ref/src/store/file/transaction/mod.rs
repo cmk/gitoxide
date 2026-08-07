@@ -38,6 +38,8 @@ pub(in crate::store_impl::file) struct Edit {
     parent_index: Option<usize>,
     /// The previous OID to put into the reflog instead of deriving it from the stored-target constraint.
     reflog_previous_oid: Option<ObjectId>,
+    /// Write the reflog even when its previous and new OIDs are equal.
+    force_reflog_update: bool,
 }
 
 impl Edit {
@@ -93,6 +95,26 @@ impl<'p> Transaction<'_, 'p> {
         name: &crate::FullNameRef,
         previous_oid: ObjectId,
     ) -> Result<Self, with_reflog_previous_oid::Error> {
+        let edit = self.prepared_object_update_mut(name)?;
+        edit.reflog_previous_oid = Some(previous_oid);
+        Ok(self)
+    }
+
+    /// Write a reflog entry for the prepared object update named `name` even if its previous and new OIDs are equal.
+    ///
+    /// This is useful when the stored representation changes, such as replacing a symbolic reference with a direct
+    /// reference to the same object. The ref update remains subject to the constraint supplied to
+    /// [`prepare()`][Transaction::prepare()].
+    pub fn force_reflog_update(mut self, name: &crate::FullNameRef) -> Result<Self, with_reflog_previous_oid::Error> {
+        let edit = self.prepared_object_update_mut(name)?;
+        edit.force_reflog_update = true;
+        Ok(self)
+    }
+
+    fn prepared_object_update_mut(
+        &mut self,
+        name: &crate::FullNameRef,
+    ) -> Result<&mut Edit, with_reflog_previous_oid::Error> {
         let updates = self
             .updates
             .as_mut()
@@ -113,8 +135,7 @@ impl<'p> Transaction<'_, 'p> {
         ) {
             return Err(with_reflog_previous_oid::Error::NotObjectUpdate { name: name.to_owned() });
         }
-        edit.reflog_previous_oid = Some(previous_oid);
-        Ok(self)
+        Ok(edit)
     }
 }
 

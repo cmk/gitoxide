@@ -319,48 +319,32 @@ fn reference_with_must_exist_constraint_must_exist_already_with_any_value() -> c
 }
 
 #[test]
-fn reference_with_must_not_exist_constraint_may_exist_already_if_the_new_value_matches_the_existing_one()
--> crate::Result {
+fn reference_with_must_not_exist_constraint_rejects_an_existing_matching_value() -> crate::Result {
     let (_keep, store) = store_writable("make_repo_for_reflog.sh")?;
     let head = store.try_find_loose("HEAD")?.expect("head exists already");
     let target = head.target;
-    let previous_reflog_count = reflog_lines(&store, "HEAD")?.len();
 
-    let edits = store
-        .transaction()
-        .prepare(
-            Some(RefEdit {
-                change: Change::Update {
-                    log: LogChange::default(),
-                    new: target.clone(),
-                    expected: PreviousValue::MustNotExist,
-                },
-                name: "HEAD".try_into()?,
-                deref: false,
-            }),
-            Fail::Immediately,
-            Fail::Immediately,
-        )?
-        .commit(committer().to_ref(&mut TimeBuf::default()))?;
-
-    assert_eq!(
-        edits,
-        vec![RefEdit {
+    let res = store.transaction().prepare(
+        Some(RefEdit {
             change: Change::Update {
                 log: LogChange::default(),
                 new: target.clone(),
-                expected: PreviousValue::MustExistAndMatch(target)
+                expected: PreviousValue::MustNotExist,
             },
             name: "HEAD".try_into()?,
             deref: false,
-        }]
+        }),
+        Fail::Immediately,
+        Fail::Immediately,
     );
-
-    assert_eq!(
-        reflog_lines(&store, "HEAD")?.len(),
-        previous_reflog_count,
-        "no new reflog is actually added"
-    );
+    match res {
+        Err(transaction::prepare::Error::MustNotExist { full_name, actual, new }) => {
+            assert_eq!(full_name, "HEAD");
+            assert_eq!(actual, target);
+            assert_eq!(new, target);
+        }
+        _ => unreachable!("unexpected result"),
+    }
     Ok(())
 }
 
@@ -484,6 +468,51 @@ fn reflog_previous_oid_can_be_set_independently_from_a_symbolic_expected_value()
         reflog_lines(&store, name.as_bstr().to_str()?)?.last(),
         Some(&log_line(old_oid, new_oid, "replace symbolic ref")),
         "the caller-provided peeled OID is independent of the stored-target constraint"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_reflog_update_can_be_forced_when_the_previous_and_new_oids_are_equal() -> crate::Result {
+    let (_keep, store) = empty_store()?;
+    let name = "refs/heads/symbolic";
+    let referent = "refs/heads/main";
+    let oid = hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+    store
+        .transaction()
+        .prepare(
+            [create_at(referent), create_symbolic_at(name, referent)],
+            Fail::Immediately,
+            Fail::Immediately,
+        )?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+
+    let name: gix_ref::FullName = name.try_into()?;
+    let transaction = store.transaction().prepare(
+        Some(RefEdit {
+            change: Change::Update {
+                log: LogChange {
+                    mode: RefLog::AndReference,
+                    force_create_reflog: true,
+                    message: "replace symbolic ref".into(),
+                },
+                expected: PreviousValue::MustExistAndMatch(Target::Symbolic(referent.try_into()?)),
+                new: Target::Object(oid),
+            },
+            name: name.clone(),
+            deref: false,
+        }),
+        Fail::Immediately,
+        Fail::Immediately,
+    )?;
+    transaction
+        .with_reflog_previous_oid(name.as_ref(), oid)?
+        .force_reflog_update(name.as_ref())?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+
+    assert_eq!(
+        reflog_lines(&store, name.as_bstr().to_str()?)?.last(),
+        Some(&log_line(oid, oid, "replace symbolic ref"))
     );
     Ok(())
 }

@@ -256,8 +256,10 @@ impl file::Store {
             .unwrap_or((commondir.into(), name))
     }
 
-    /// Implements the logic required to transform a fully qualified refname into a filesystem path
-    pub(crate) fn reference_path_with_base<'b>(&self, name: &'b FullNameRef) -> (Cow<'_, Path>, Cow<'b, Path>) {
+    /// Return the authoritative storage base and relative path for `name`.
+    ///
+    /// The result accounts for namespaces and for references whose storage is private to the main or a linked worktree.
+    pub fn reference_path_with_base<'b>(&self, name: &'b FullNameRef) -> (Cow<'_, Path>, Cow<'b, Path>) {
         let (base, name) = self.to_base_dir_and_relative_name(name, false);
         (
             base,
