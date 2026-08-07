@@ -255,7 +255,7 @@ impl Transaction<'_, '_> {
                 update,
                 lock: None,
                 parent_index: None,
-                leaf_referent_previous_oid: None,
+                reflog_previous_oid: None,
             })
             .collect();
         updates
@@ -271,7 +271,7 @@ impl Transaction<'_, '_> {
                     update,
                     lock: None,
                     parent_index: Some(idx),
-                    leaf_referent_previous_oid: None,
+                    reflog_previous_oid: None,
                 },
             )
             .map_err(Error::PreprocessingFailed)?;
@@ -423,7 +423,7 @@ impl Transaction<'_, '_> {
                 let mut parent_idx_cursor = Some(parent_idx);
                 while let Some(parent) = parent_idx_cursor.take().map(|idx| &mut updates[idx]) {
                     parent_idx_cursor = parent.parent_index;
-                    parent.leaf_referent_previous_oid = Some(oid);
+                    parent.reflog_previous_oid = Some(oid);
                 }
             }
         }

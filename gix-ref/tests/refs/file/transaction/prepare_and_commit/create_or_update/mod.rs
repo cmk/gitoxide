@@ -438,6 +438,57 @@ fn symbolic_reference_writes_reflog_if_previous_value_is_set() -> crate::Result 
 }
 
 #[test]
+fn reflog_previous_oid_can_be_set_independently_from_a_symbolic_expected_value() -> crate::Result {
+    let (_keep, store) = empty_store()?;
+    let name = "refs/heads/symbolic";
+    let referent = "refs/heads/main";
+    let old_oid = hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+    let new_oid = hex_to_id("28ce6a8b26aa170e1de65536fe8abe1832bd3242");
+    store
+        .transaction()
+        .prepare(
+            [create_at(referent), create_symbolic_at(name, referent)],
+            Fail::Immediately,
+            Fail::Immediately,
+        )?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+
+    let name: gix_ref::FullName = name.try_into()?;
+    let transaction = store.transaction().prepare(
+        Some(RefEdit {
+            change: Change::Update {
+                log: LogChange {
+                    mode: RefLog::AndReference,
+                    force_create_reflog: true,
+                    message: "replace symbolic ref".into(),
+                },
+                expected: PreviousValue::MustExistAndMatch(Target::Symbolic(referent.try_into()?)),
+                new: Target::Object(new_oid),
+            },
+            name: name.clone(),
+            deref: false,
+        }),
+        Fail::Immediately,
+        Fail::Immediately,
+    )?;
+    transaction
+        .with_reflog_previous_oid(name.as_ref(), old_oid)?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+
+    assert_eq!(
+        store.find_loose(name.as_ref())?.target.try_id(),
+        Some(new_oid.as_ref()),
+        "the symbolic ref itself is replaced"
+    );
+    assert_eq!(
+        reflog_lines(&store, name.as_bstr().to_str()?)?.last(),
+        Some(&log_line(old_oid, new_oid, "replace symbolic ref")),
+        "the caller-provided peeled OID is independent of the stored-target constraint"
+    );
+    Ok(())
+}
+
+#[test]
 fn windows_device_name_is_illegal_with_enabled_windows_protections() -> crate::Result {
     let (_keep, mut store) = empty_store()?;
     store.prohibit_windows_device_names = true;

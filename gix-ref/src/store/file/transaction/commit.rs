@@ -61,13 +61,12 @@ impl Transaction<'_, '_> {
                                 }
                             }
                             Target::Object(new_oid) => {
-                                let previous = match expected {
+                                let previous = change.reflog_previous_oid.or_else(|| match expected {
                                     // Here, this means that the ref already existed, and that it will receive (even transitively)
                                     // the given value
                                     PreviousValue::MustExistAndMatch(Target::Object(oid)) => Some(oid.to_owned()),
                                     _ => None,
-                                }
-                                .or(change.leaf_referent_previous_oid);
+                                });
                                 Some((previous, new_oid))
                             }
                         };

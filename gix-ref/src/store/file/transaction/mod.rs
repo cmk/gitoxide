@@ -36,9 +36,8 @@ pub(in crate::store_impl::file) struct Edit {
     /// Set if this update is coming from a symbolic reference and used to make it appear like it is the one that is handled,
     /// instead of the referent reference.
     parent_index: Option<usize>,
-    /// For symbolic refs, this is the previous OID to put into the reflog instead of our own previous value. It's the
-    /// peeled value of the leaf referent.
-    leaf_referent_previous_oid: Option<ObjectId>,
+    /// The previous OID to put into the reflog instead of deriving it from the stored-target constraint.
+    reflog_previous_oid: Option<ObjectId>,
 }
 
 impl Edit {
@@ -82,6 +81,57 @@ impl<'p> Transaction<'_, 'p> {
     pub fn packed_refs(mut self, packed_refs: PackedRefs<'p>) -> Self {
         self.packed_refs = packed_refs;
         self
+    }
+
+    /// Use `previous_oid` as the previous object ID in the reflog entry for the prepared object update named `name`.
+    ///
+    /// This allows the reflog value to remain independent of the stored-target constraint used during
+    /// [`prepare()`][Transaction::prepare()]. It is useful when replacing a symbolic reference without dereferencing it:
+    /// the constraint can compare the symbolic target while the reflog records the symbolic reference's peeled object ID.
+    pub fn with_reflog_previous_oid(
+        mut self,
+        name: &crate::FullNameRef,
+        previous_oid: ObjectId,
+    ) -> Result<Self, with_reflog_previous_oid::Error> {
+        let updates = self
+            .updates
+            .as_mut()
+            .ok_or(with_reflog_previous_oid::Error::Unprepared)?;
+        let mut matches = updates.iter_mut().filter(|edit| edit.update.name.as_ref() == name);
+        let edit = matches
+            .next()
+            .ok_or_else(|| with_reflog_previous_oid::Error::MissingEdit { name: name.to_owned() })?;
+        if matches.next().is_some() {
+            return Err(with_reflog_previous_oid::Error::AmbiguousEdit { name: name.to_owned() });
+        }
+        if !matches!(
+            edit.update.change,
+            crate::transaction::Change::Update {
+                new: crate::Target::Object(_),
+                ..
+            }
+        ) {
+            return Err(with_reflog_previous_oid::Error::NotObjectUpdate { name: name.to_owned() });
+        }
+        edit.reflog_previous_oid = Some(previous_oid);
+        Ok(self)
+    }
+}
+
+/// The error returned by [`Transaction::with_reflog_previous_oid()`].
+pub mod with_reflog_previous_oid {
+    /// The error returned by [`Transaction::with_reflog_previous_oid()`][super::Transaction::with_reflog_previous_oid()].
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum Error {
+        #[error("the transaction must be prepared before configuring its reflog")]
+        Unprepared,
+        #[error("the prepared transaction has no edit named {name:?}")]
+        MissingEdit { name: crate::FullName },
+        #[error("the prepared transaction has multiple edits named {name:?}")]
+        AmbiguousEdit { name: crate::FullName },
+        #[error("the prepared edit named {name:?} is not an object update")]
+        NotObjectUpdate { name: crate::FullName },
     }
 }
 
