@@ -518,6 +518,53 @@ fn a_reflog_update_can_be_forced_when_the_previous_and_new_oids_are_equal() -> c
 }
 
 #[test]
+fn a_same_value_update_can_retain_the_loose_reference_lock_without_committing_it()
+-> crate::Result {
+    let (_keep, store) = empty_store()?;
+    let name: gix_ref::FullName = "refs/heads/main".try_into()?;
+    let oid = hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+    store
+        .transaction()
+        .prepare(
+            [create_at(name.as_bstr().to_str()?)],
+            Fail::Immediately,
+            Fail::Immediately,
+        )?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+
+    let transaction = store
+        .transaction()
+        .prepare(
+            [RefEdit {
+                change: Change::Update {
+                    log: LogChange::default(),
+                    expected: PreviousValue::Any,
+                    new: Target::Object(oid),
+                },
+                name: name.clone(),
+                deref: false,
+            }],
+            Fail::Immediately,
+            Fail::Immediately,
+        )?
+        .ensure_ref_lock(name.as_ref(), Fail::Immediately)?;
+    let (base, relative_path) = store.reference_path_with_base(name.as_ref());
+    assert!(
+        gix_lock::Marker::acquire_to_hold_resource(
+            base.join(relative_path.as_ref()),
+            Fail::Immediately,
+            Some(base.into_owned()),
+        )
+        .is_err(),
+        "the no-op transaction retains the named lock"
+    );
+
+    transaction.commit(committer().to_ref(&mut TimeBuf::default()))?;
+    assert_eq!(store.find(name.as_ref())?.target.try_id(), Some(oid.as_ref()));
+    Ok(())
+}
+
+#[test]
 fn windows_device_name_is_illegal_with_enabled_windows_protections() -> crate::Result {
     let (_keep, mut store) = empty_store()?;
     store.prohibit_windows_device_names = true;

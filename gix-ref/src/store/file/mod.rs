@@ -115,6 +115,7 @@ pub struct Transaction<'s, 'p> {
     store: &'s Store,
     packed_transaction: Option<crate::store_impl::packed::Transaction>,
     updates: Option<Vec<transaction::Edit>>,
+    loose_ref_guards: Vec<gix_lock::Marker>,
     packed_refs: transaction::PackedRefs<'p>,
 }
 

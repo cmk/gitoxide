@@ -73,6 +73,7 @@ impl file::Store {
             store: self,
             packed_transaction: None,
             updates: None,
+            loose_ref_guards: Vec::new(),
             packed_refs: PackedRefs::default(),
         }
     }
@@ -131,17 +132,20 @@ impl<'p> Transaction<'_, 'p> {
             return Err(ensure_ref_lock::Error::AmbiguousEdit { name: name.to_owned() });
         }
         if edit.lock.is_none() {
-            edit.lock = Some(
-                gix_lock::Marker::acquire_to_hold_resource(
-                    base.join(relative_path.as_ref()),
-                    lock_fail_mode,
-                    Some(base.into_owned()),
-                )
-                .map_err(|source| ensure_ref_lock::Error::LockAcquire {
-                    source,
-                    name: name.to_owned(),
-                })?,
-            );
+            let marker = gix_lock::Marker::acquire_to_hold_resource(
+                base.join(relative_path.as_ref()),
+                lock_fail_mode,
+                Some(base.into_owned()),
+            )
+            .map_err(|source| ensure_ref_lock::Error::LockAcquire {
+                source,
+                name: name.to_owned(),
+            })?;
+            if matches!(edit.update.change, crate::transaction::Change::Update { .. }) {
+                self.loose_ref_guards.push(marker);
+            } else {
+                edit.lock = Some(marker);
+            }
         }
         Ok(self)
     }
