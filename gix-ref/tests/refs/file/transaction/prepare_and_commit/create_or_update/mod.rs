@@ -625,7 +625,12 @@ fn windows_device_name_check_runs_before_lock_acquisition() -> crate::Result {
 
 #[test]
 fn symbolic_head_missing_referent_then_update_referent() -> crate::Result {
-    for reflog_writemode in &[WriteReflog::Normal, WriteReflog::Disable, WriteReflog::Always] {
+    for reflog_writemode in &[
+        WriteReflog::Normal,
+        WriteReflog::ExistingOnly,
+        WriteReflog::Disable,
+        WriteReflog::Always,
+    ] {
         let (_keep, mut store) = empty_store()?;
         store.write_reflog = *reflog_writemode;
         let referent = "refs/heads/alt-main";
@@ -764,7 +769,7 @@ fn symbolic_head_missing_referent_then_update_referent() -> crate::Result {
                     let expected_line = log_line(crate::fixture_hash_kind().null(), new_oid, "an actual change");
                     assert_eq!(reflog_lines(&store, ref_name)?, vec![expected_line]);
                 }
-                WriteReflog::Disable => {
+                WriteReflog::ExistingOnly | WriteReflog::Disable => {
                     assert!(
                         store.reflog_iter(*ref_name, &mut buf)?.is_none(),
                         "nothing is ever written if its disabled"

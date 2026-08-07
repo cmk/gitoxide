@@ -341,7 +341,7 @@ mod log_all_ref_updates {
                 Ok(Some(bool)) => Ok(Some(if bool {
                     gix_ref::store::WriteReflog::Normal
                 } else {
-                    gix_ref::store::WriteReflog::Disable
+                    gix_ref::store::WriteReflog::ExistingOnly
                 })),
                 Err(err) => match err.input {
                     val if val.eq_ignore_ascii_case(b"always") => Ok(Some(gix_ref::store::WriteReflog::Always)),

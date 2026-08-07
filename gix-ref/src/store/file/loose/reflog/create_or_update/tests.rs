@@ -33,7 +33,12 @@ fn reflog_lines(store: &file::Store, name: &str, buf: &mut Vec<u8>) -> Result<Ve
         .map_err(Into::into)
 }
 
-const WRITE_MODES: &[WriteReflog] = &[WriteReflog::Normal, WriteReflog::Disable, WriteReflog::Always];
+const WRITE_MODES: &[WriteReflog] = &[
+    WriteReflog::Normal,
+    WriteReflog::ExistingOnly,
+    WriteReflog::Disable,
+    WriteReflog::Always,
+];
 
 #[test]
 fn should_autocreate_is_unaffected_by_writemode() -> Result {
@@ -103,7 +108,7 @@ fn missing_reflog_creates_it_even_if_similarly_named_empty_dir_exists_and_append
                     }
                 );
             }
-            WriteReflog::Disable => {
+            WriteReflog::ExistingOnly | WriteReflog::Disable => {
                 assert!(
                     store.reflog_iter(full_name, &mut buf)?.is_none(),
                     "there is no logs in disabled mode"
@@ -140,7 +145,7 @@ fn missing_reflog_creates_it_even_if_similarly_named_empty_dir_exists_and_append
                     "the empty directory was replaced with the reflog file"
                 );
             }
-            WriteReflog::Disable => {
+            WriteReflog::ExistingOnly | WriteReflog::Disable => {
                 assert!(
                     store.reflog_iter(full_name_str, &mut buf)?.is_none(),
                     "reflog still doesn't exist"
@@ -153,6 +158,39 @@ fn missing_reflog_creates_it_even_if_similarly_named_empty_dir_exists_and_append
             }
         }
     }
+    Ok(())
+}
+
+#[test]
+fn existing_only_appends_without_creating() -> Result {
+    let (_keep, store) = empty_store(WriteReflog::ExistingOnly)?;
+    let existing: &FullNameRef = "refs/heads/existing".try_into()?;
+    let absent: &FullNameRef = "refs/heads/absent".try_into()?;
+    let previous = hex_to_id("0000000000000000000000111111111111111111");
+    let new = hex_to_id("28ce6a8b26aa170e1de65536fe8abe1832bd3242");
+    let committer = Signature {
+        name: "committer".into(),
+        email: "committer@example.com".into(),
+        time: gix_date::parse_header("1234 +0800").expect("valid fixture timestamp"),
+    };
+    let existing_path = store.reflog_path(existing);
+    std::fs::create_dir_all(existing_path.parent().expect("reflog has parent"))?;
+    std::fs::write(&existing_path, b"")?;
+
+    for name in [existing, absent] {
+        store.reflog_create_or_append(
+            name,
+            Some(previous),
+            &new,
+            committer.to_ref(&mut TimeBuf::default()).into(),
+            b"message".as_bstr(),
+            false,
+        )?;
+    }
+
+    let mut buf = Vec::new();
+    assert_eq!(reflog_lines(&store, existing.as_bstr().to_str()?, &mut buf)?.len(), 1);
+    assert!(!store.reflog_path(absent).exists());
     Ok(())
 }
 

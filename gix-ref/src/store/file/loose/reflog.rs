@@ -108,7 +108,7 @@ pub mod create_or_update {
         ) -> Result<(), Error> {
             let (reflog_base, full_name) = self.reflog_base_and_relative_path(name);
             match self.write_reflog {
-                WriteReflog::Normal | WriteReflog::Always => {
+                WriteReflog::Normal | WriteReflog::Always | WriteReflog::ExistingOnly => {
                     if self.write_reflog == WriteReflog::Always {
                         force_create_reflog = true;
                     }
@@ -116,7 +116,9 @@ pub mod create_or_update {
                     options.append(true).read(false);
                     let log_path = reflog_base.join(&full_name);
 
-                    if force_create_reflog || self.should_autocreate_reflog(&full_name) {
+                    if force_create_reflog
+                        || (self.write_reflog != WriteReflog::ExistingOnly && self.should_autocreate_reflog(&full_name))
+                    {
                         let parent_dir = log_path.parent().expect("always with parent directory");
                         gix_tempfile::create_dir::all(parent_dir, Default::default()).map_err(|err| {
                             Error::CreateLeadingDirectories {
@@ -133,13 +135,17 @@ pub mod create_or_update {
                         Err(err) => {
                             // TODO: when Kind::IsADirectory becomes stable, use that.
                             if log_path.is_dir() {
-                                gix_tempfile::remove_dir::empty_depth_first(log_path.clone())
-                                    .and_then(|_| options.open(&log_path))
-                                    .map(Some)
-                                    .map_err(|_| Error::Append {
-                                        source: err,
-                                        reflog_path: self.reflog_path(name),
-                                    })?
+                                if self.write_reflog == WriteReflog::ExistingOnly {
+                                    None
+                                } else {
+                                    gix_tempfile::remove_dir::empty_depth_first(log_path.clone())
+                                        .and_then(|_| options.open(&log_path))
+                                        .map(Some)
+                                        .map_err(|_| Error::Append {
+                                            source: err,
+                                            reflog_path: self.reflog_path(name),
+                                        })?
+                                }
                             } else {
                                 return Err(Error::Append {
                                     source: err,

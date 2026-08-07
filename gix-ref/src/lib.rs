@@ -80,6 +80,11 @@ pub mod store {
         /// Write a ref log for ref edits according to the standard rules.
         #[default]
         Normal,
+        /// Append to an existing reflog, but never create one.
+        ///
+        /// This matches `core.logAllRefUpdates=false`: Git suppresses automatic
+        /// creation without suppressing updates to a log that already exists.
+        ExistingOnly,
         /// Never write a ref log.
         Disable,
     }
