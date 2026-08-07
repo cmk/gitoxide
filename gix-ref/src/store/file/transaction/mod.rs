@@ -111,6 +111,41 @@ impl<'p> Transaction<'_, 'p> {
         Ok(self)
     }
 
+    /// Ensure the prepared edit named `name` holds the lock for its loose reference path.
+    ///
+    /// A transaction that already holds the named lock is unchanged. This is useful when a no-op update released its
+    /// ordinary update lock, but its caller must still exclude a concurrent loose reference update before revalidating
+    /// an external precondition.
+    pub fn ensure_ref_lock(
+        mut self,
+        name: &crate::FullNameRef,
+        lock_fail_mode: gix_lock::acquire::Fail,
+    ) -> Result<Self, ensure_ref_lock::Error> {
+        let (base, relative_path) = self.store.reference_path_with_base(name);
+        let updates = self.updates.as_mut().ok_or(ensure_ref_lock::Error::Unprepared)?;
+        let mut matches = updates.iter_mut().filter(|edit| edit.update.name.as_ref() == name);
+        let edit = matches
+            .next()
+            .ok_or_else(|| ensure_ref_lock::Error::MissingEdit { name: name.to_owned() })?;
+        if matches.next().is_some() {
+            return Err(ensure_ref_lock::Error::AmbiguousEdit { name: name.to_owned() });
+        }
+        if edit.lock.is_none() {
+            edit.lock = Some(
+                gix_lock::Marker::acquire_to_hold_resource(
+                    base.join(relative_path.as_ref()),
+                    lock_fail_mode,
+                    Some(base.into_owned()),
+                )
+                .map_err(|source| ensure_ref_lock::Error::LockAcquire {
+                    source,
+                    name: name.to_owned(),
+                })?,
+            );
+        }
+        Ok(self)
+    }
+
     fn prepared_object_update_mut(
         &mut self,
         name: &crate::FullNameRef,
@@ -153,6 +188,26 @@ pub mod with_reflog_previous_oid {
         AmbiguousEdit { name: crate::FullName },
         #[error("the prepared edit named {name:?} is not an object update")]
         NotObjectUpdate { name: crate::FullName },
+    }
+}
+
+/// The error returned by [`Transaction::ensure_ref_lock()`].
+pub mod ensure_ref_lock {
+    /// The error returned by [`Transaction::ensure_ref_lock()`][super::Transaction::ensure_ref_lock()].
+    #[derive(Debug, thiserror::Error)]
+    #[allow(missing_docs)]
+    pub enum Error {
+        #[error("the transaction must be prepared before ensuring a reference lock")]
+        Unprepared,
+        #[error("the prepared transaction has no edit named {name:?}")]
+        MissingEdit { name: crate::FullName },
+        #[error("the prepared transaction has multiple edits named {name:?}")]
+        AmbiguousEdit { name: crate::FullName },
+        #[error("could not acquire the loose-reference lock for {name:?}")]
+        LockAcquire {
+            source: gix_lock::acquire::Error,
+            name: crate::FullName,
+        },
     }
 }
 
