@@ -233,6 +233,12 @@ blocking-http-transport-reqwest-rust-tls = [
     "blocking-http-transport-reqwest",
     "gix-transport/http-client-reqwest-rust-tls",
 ]
+## Stacks with `blocking-http-transport-reqwest` and enables `https://` via the `rustls` crate without selecting a crypto provider.
+## The application must install a `rustls::crypto::CryptoProvider` before constructing the HTTP client.
+blocking-http-transport-reqwest-rust-tls-no-provider = [
+    "blocking-http-transport-reqwest",
+    "gix-transport/http-client-reqwest-rust-tls-no-provider",
+]
 ## Stacks with `blocking-http-transport-reqwest` and enables `https://` via the `rustls` crate.
 ## This also makes use of `trust-dns` to avoid `getaddrinfo`, but note it comes with its own problems.
 blocking-http-transport-reqwest-rust-tls-trust-dns = [

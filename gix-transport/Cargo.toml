@@ -38,11 +38,15 @@ http-client-curl-rust-tls = ["http-client-curl", "curl/rustls"]
 ## If used in conjunction with `http-client-curl-rust-tls`, the `rust-tls` feature will take precedence.
 http-client-curl-openssl = ["http-client-curl", "curl/ssl"]
 ## Implies `http-client` and adds support for http transports using the blocking version of `reqwest`.
-## NOTE: `https://` is NOT supported by default. You must enable one of the `http-client-reqwest-rust-tls`
+## NOTE: `https://` is NOT supported by default. You must enable one of the
+## `http-client-reqwest-rust-tls`, `http-client-reqwest-rust-tls-no-provider`,
 ## or `http-client-reqwest-native-tls` features to enable HTTPS support.
 http-client-reqwest = ["reqwest", "http-client"]
 ## Stacks with `http-client-reqwest` and enables `https://` via the `rustls` crate.
 http-client-reqwest-rust-tls = ["http-client-reqwest", "reqwest/rustls"]
+## Stacks with `http-client-reqwest` and enables `https://` via the `rustls` crate without selecting a crypto provider.
+## The application must install a `rustls::crypto::CryptoProvider` before constructing the HTTP client.
+http-client-reqwest-rust-tls-no-provider = ["http-client-reqwest", "reqwest/rustls-no-provider"]
 ## Stacks with `http-client-reqwest` and enables `https://` via the `rustls` crate.
 ## This also makes use of `trust-dns` to avoid `getaddrinfo`, but note it comes with its own problems.
 http-client-reqwest-rust-tls-trust-dns = [
