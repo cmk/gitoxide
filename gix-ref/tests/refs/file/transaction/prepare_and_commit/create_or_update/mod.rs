@@ -422,6 +422,174 @@ fn symbolic_reference_writes_reflog_if_previous_value_is_set() -> crate::Result 
 }
 
 #[test]
+fn symbolic_reflog_oids_can_be_set_independently_from_symbolic_targets() -> crate::Result {
+    let (_keep, store) = empty_store()?;
+    let name: gix_ref::FullName = "HEAD".try_into()?;
+    let previous_target = "refs/heads/main";
+    let new_target = "refs/heads/topic";
+    let previous_oid = hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+    let new_oid = hex_to_id("28ce6a8b26aa170e1de65536fe8abe1832bd3242");
+    store
+        .transaction()
+        .prepare(
+            [create_symbolic_at(name.as_bstr().to_str()?, previous_target)],
+            Fail::Immediately,
+            Fail::Immediately,
+        )?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+
+    let transaction = store.transaction().prepare(
+        [RefEdit {
+            change: Change::Update {
+                log: LogChange {
+                    mode: RefLog::AndReference,
+                    force_create_reflog: true,
+                    message: "retarget symbolic ref".into(),
+                },
+                expected: PreviousValue::MustExistAndMatch(Target::Symbolic(previous_target.try_into()?)),
+                new: Target::Symbolic(new_target.try_into()?),
+            },
+            name: name.clone(),
+            deref: false,
+        }],
+        Fail::Immediately,
+        Fail::Immediately,
+    )?;
+    transaction
+        .with_symbolic_reflog(name.as_ref(), previous_oid, new_oid)?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+
+    assert_eq!(
+        store
+            .find_loose(name.as_ref())?
+            .target
+            .try_name()
+            .map(gix_ref::FullNameRef::as_bstr),
+        Some(new_target.as_bytes().as_bstr()),
+        "the symbolic ref itself is retargeted"
+    );
+    assert_eq!(
+        reflog_lines(&store, name.as_bstr().to_str()?)?.last(),
+        Some(&log_line(previous_oid, new_oid, "retarget symbolic ref")),
+        "the caller-provided peeled OIDs are independent of both symbolic targets"
+    );
+    Ok(())
+}
+
+#[test]
+fn symbolic_retarget_writes_reflog_when_peeled_oids_are_equal() -> crate::Result {
+    let (_keep, store) = empty_store()?;
+    let name: gix_ref::FullName = "HEAD".try_into()?;
+    let previous_target = "refs/heads/main";
+    let new_target = "refs/heads/topic";
+    let oid = hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+    store
+        .transaction()
+        .prepare(
+            [create_symbolic_at(name.as_bstr().to_str()?, previous_target)],
+            Fail::Immediately,
+            Fail::Immediately,
+        )?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+
+    let transaction = store.transaction().prepare(
+        [RefEdit {
+            change: Change::Update {
+                log: LogChange {
+                    mode: RefLog::AndReference,
+                    force_create_reflog: true,
+                    message: "retarget equal tips".into(),
+                },
+                expected: PreviousValue::MustExistAndMatch(Target::Symbolic(previous_target.try_into()?)),
+                new: Target::Symbolic(new_target.try_into()?),
+            },
+            name: name.clone(),
+            deref: false,
+        }],
+        Fail::Immediately,
+        Fail::Immediately,
+    )?;
+    transaction
+        .with_symbolic_reflog(name.as_ref(), oid, oid)?
+        .commit(committer().to_ref(&mut TimeBuf::default()))?;
+
+    assert_eq!(
+        reflog_lines(&store, name.as_bstr().to_str()?)?.last(),
+        Some(&log_line(oid, oid, "retarget equal tips")),
+        "an explicit symbolic reflog request records the target change even when both branches peel to the same object"
+    );
+    Ok(())
+}
+
+#[test]
+fn symbolic_reflog_configuration_rejects_object_updates() -> crate::Result {
+    let (_keep, store) = empty_store()?;
+    let name: gix_ref::FullName = "refs/heads/main".try_into()?;
+    let previous_oid = hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+    let new_oid = hex_to_id("28ce6a8b26aa170e1de65536fe8abe1832bd3242");
+    let transaction = store.transaction().prepare(
+        [RefEdit {
+            change: Change::Update {
+                log: LogChange::default(),
+                expected: PreviousValue::MustNotExist,
+                new: Target::Object(new_oid),
+            },
+            name: name.clone(),
+            deref: false,
+        }],
+        Fail::Immediately,
+        Fail::Immediately,
+    )?;
+
+    let error = match transaction.with_symbolic_reflog(name.as_ref(), previous_oid, new_oid) {
+        Ok(_) => return Err("an object update accepted symbolic reflog OIDs".into()),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(
+            error,
+            transaction::with_reflog_previous_oid::Error::NotSymbolicUpdate { .. }
+        ),
+        "the symbolic-only builder rejects object updates"
+    );
+    Ok(())
+}
+
+#[test]
+fn object_reflog_configuration_rejects_symbolic_updates() -> crate::Result {
+    let (_keep, store) = empty_store()?;
+    let name: gix_ref::FullName = "HEAD".try_into()?;
+    let new_target = "refs/heads/topic";
+    let previous_oid = hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+    let transaction = store.transaction().prepare(
+        [RefEdit {
+            change: Change::Update {
+                log: LogChange::default(),
+                expected: PreviousValue::Any,
+                new: Target::Symbolic(new_target.try_into()?),
+            },
+            name: name.clone(),
+            deref: false,
+        }],
+        Fail::Immediately,
+        Fail::Immediately,
+    )?;
+
+    let error = match transaction.with_reflog_previous_oid(name.as_ref(), previous_oid) {
+        Ok(_) => return Err("a symbolic update accepted an object reflog override".into()),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(
+            error,
+            transaction::with_reflog_previous_oid::Error::NotObjectUpdate { .. }
+        ),
+        "the object-only builder rejects symbolic updates"
+    );
+    Ok(())
+}
+
+#[test]
 fn reflog_previous_oid_can_be_set_independently_from_a_symbolic_expected_value() -> crate::Result {
     let (_keep, store) = empty_store()?;
     let name = "refs/heads/symbolic";
@@ -518,8 +686,7 @@ fn a_reflog_update_can_be_forced_when_the_previous_and_new_oids_are_equal() -> c
 }
 
 #[test]
-fn a_same_value_update_can_retain_the_loose_reference_lock_without_committing_it()
--> crate::Result {
+fn a_same_value_update_can_retain_the_loose_reference_lock_without_committing_it() -> crate::Result {
     let (_keep, store) = empty_store()?;
     let name: gix_ref::FullName = "refs/heads/main".try_into()?;
     let oid = hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");

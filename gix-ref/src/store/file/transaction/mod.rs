@@ -38,6 +38,8 @@ pub(in crate::store_impl::file) struct Edit {
     parent_index: Option<usize>,
     /// The previous OID to put into the reflog instead of deriving it from the stored-target constraint.
     reflog_previous_oid: Option<ObjectId>,
+    /// The previous and new peeled OIDs to put into the reflog for a symbolic-target update.
+    symbolic_reflog_oids: Option<(ObjectId, ObjectId)>,
     /// Write the reflog even when its previous and new OIDs are equal.
     force_reflog_update: bool,
 }
@@ -112,6 +114,22 @@ impl<'p> Transaction<'_, 'p> {
         Ok(self)
     }
 
+    /// Write the reflog for the prepared symbolic update named `name` with its peeled object IDs.
+    ///
+    /// Symbolic targets carry no object IDs themselves, so callers that have peeled the previous and new targets may
+    /// provide both values without weakening the stored-target constraint supplied to [`prepare()`][Transaction::prepare()].
+    /// Unlike object updates, an explicit symbolic reflog update is written even when both targets peel to the same object.
+    pub fn with_symbolic_reflog(
+        mut self,
+        name: &crate::FullNameRef,
+        previous_oid: ObjectId,
+        new_oid: ObjectId,
+    ) -> Result<Self, with_reflog_previous_oid::Error> {
+        let edit = self.prepared_symbolic_update_mut(name)?;
+        edit.symbolic_reflog_oids = Some((previous_oid, new_oid));
+        Ok(self)
+    }
+
     /// Ensure the prepared edit named `name` holds the lock for its loose reference path.
     ///
     /// A transaction that already holds the named lock is unchanged. This is useful when a no-op update released its
@@ -154,17 +172,7 @@ impl<'p> Transaction<'_, 'p> {
         &mut self,
         name: &crate::FullNameRef,
     ) -> Result<&mut Edit, with_reflog_previous_oid::Error> {
-        let updates = self
-            .updates
-            .as_mut()
-            .ok_or(with_reflog_previous_oid::Error::Unprepared)?;
-        let mut matches = updates.iter_mut().filter(|edit| edit.update.name.as_ref() == name);
-        let edit = matches
-            .next()
-            .ok_or_else(|| with_reflog_previous_oid::Error::MissingEdit { name: name.to_owned() })?;
-        if matches.next().is_some() {
-            return Err(with_reflog_previous_oid::Error::AmbiguousEdit { name: name.to_owned() });
-        }
+        let edit = self.prepared_update_mut(name)?;
         if !matches!(
             edit.update.change,
             crate::transaction::Change::Update {
@@ -176,11 +184,43 @@ impl<'p> Transaction<'_, 'p> {
         }
         Ok(edit)
     }
+
+    fn prepared_symbolic_update_mut(
+        &mut self,
+        name: &crate::FullNameRef,
+    ) -> Result<&mut Edit, with_reflog_previous_oid::Error> {
+        let edit = self.prepared_update_mut(name)?;
+        if !matches!(
+            edit.update.change,
+            crate::transaction::Change::Update {
+                new: crate::Target::Symbolic(_),
+                ..
+            }
+        ) {
+            return Err(with_reflog_previous_oid::Error::NotSymbolicUpdate { name: name.to_owned() });
+        }
+        Ok(edit)
+    }
+
+    fn prepared_update_mut(&mut self, name: &crate::FullNameRef) -> Result<&mut Edit, with_reflog_previous_oid::Error> {
+        let updates = self
+            .updates
+            .as_mut()
+            .ok_or(with_reflog_previous_oid::Error::Unprepared)?;
+        let mut matches = updates.iter_mut().filter(|edit| edit.update.name.as_ref() == name);
+        let edit = matches
+            .next()
+            .ok_or_else(|| with_reflog_previous_oid::Error::MissingEdit { name: name.to_owned() })?;
+        if matches.next().is_some() {
+            return Err(with_reflog_previous_oid::Error::AmbiguousEdit { name: name.to_owned() });
+        }
+        Ok(edit)
+    }
 }
 
-/// The error returned by [`Transaction::with_reflog_previous_oid()`].
+/// Errors returned by the transaction's reflog-configuration builders.
 pub mod with_reflog_previous_oid {
-    /// The error returned by [`Transaction::with_reflog_previous_oid()`][super::Transaction::with_reflog_previous_oid()].
+    /// An invalid prepared edit or transaction state for a reflog-configuration builder.
     #[derive(Debug, thiserror::Error)]
     #[allow(missing_docs)]
     pub enum Error {
@@ -192,6 +232,8 @@ pub mod with_reflog_previous_oid {
         AmbiguousEdit { name: crate::FullName },
         #[error("the prepared edit named {name:?} is not an object update")]
         NotObjectUpdate { name: crate::FullName },
+        #[error("the prepared edit named {name:?} is not a symbolic update")]
+        NotSymbolicUpdate { name: crate::FullName },
     }
 }
 

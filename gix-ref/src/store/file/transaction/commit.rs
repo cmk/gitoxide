@@ -48,18 +48,20 @@ impl Transaction<'_, '_> {
                         RefLog::AndReference => (true, true),
                     };
                     if update_reflog {
+                        let explicit_symbolic_reflog = change.symbolic_reflog_oids.is_some();
                         let log_update = match new {
-                            Target::Symbolic(_) => {
+                            Target::Symbolic(_) => match change.symbolic_reflog_oids.as_ref() {
+                                Some((previous_oid, new_oid)) => Some((Some(previous_oid.to_owned()), new_oid)),
                                 // Special HACK: no reflog for symref changes as there is no OID involved which the reflog needs.
                                 // Unless, the ref is new and we can obtain a peeled id
                                 // identified by the expectation of what could be there, as is the case when cloning.
-                                match expected {
+                                None => match expected {
                                     PreviousValue::ExistingMustMatch(Target::Object(oid)) => {
                                         Some((Some(gix_hash::ObjectId::null(oid.kind())), oid))
                                     }
                                     _ => None,
-                                }
-                            }
+                                },
+                            },
                             Target::Object(new_oid) => {
                                 let previous = change.reflog_previous_oid.or_else(|| match expected {
                                     // Here, this means that the ref already existed, and that it will receive (even transitively)
@@ -71,7 +73,9 @@ impl Transaction<'_, '_> {
                             }
                         };
                         if let Some((previous, new_oid)) = log_update {
-                            let do_update = change.force_reflog_update || previous.as_ref() != Some(new_oid);
+                            let do_update = explicit_symbolic_reflog
+                                || change.force_reflog_update
+                                || previous.as_ref() != Some(new_oid);
                             if do_update {
                                 self.store.reflog_create_or_append(
                                     change.update.name.as_ref(),

@@ -254,6 +254,7 @@ impl Transaction<'_, '_> {
                 lock: None,
                 parent_index: None,
                 reflog_previous_oid: None,
+                symbolic_reflog_oids: None,
                 force_reflog_update: false,
             })
             .collect();
@@ -271,6 +272,7 @@ impl Transaction<'_, '_> {
                     lock: None,
                     parent_index: Some(idx),
                     reflog_previous_oid: None,
+                    symbolic_reflog_oids: None,
                     force_reflog_update: false,
                 },
             )
