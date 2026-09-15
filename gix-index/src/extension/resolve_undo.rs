@@ -5,11 +5,8 @@ use crate::{extension::Signature, util::split_at_byte_exclusive};
 
 pub type Paths = Vec<ResolvePath>;
 
-#[expect(
-    dead_code,
-    reason = "REUC is decoded but not yet exposed or written; retain its fields for planned round-trip support"
-)]
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub struct ResolvePath {
     /// relative to the root of the repository, or what would be stored in the index
     name: BString,
@@ -18,11 +15,8 @@ pub struct ResolvePath {
     stages: [Option<Stage>; 3],
 }
 
-#[expect(
-    dead_code,
-    reason = "REUC is decoded but not yet exposed or written; retain its fields for planned round-trip support"
-)]
 #[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub struct Stage {
     mode: u32,
     id: ObjectId,
@@ -65,3 +59,27 @@ pub fn decode(mut data: &[u8], object_hash: gix_hash::Kind) -> Option<Paths> {
     }
     out.into()
 }
+
+pub(crate) fn write_to(paths: &[ResolvePath], mut out: impl std::io::Write) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut entries = Vec::new();
+    for path in paths {
+        entries.write_all(&path.name)?;
+        entries.write_all(b"\0")?;
+        for stage in &path.stages {
+            write!(entries, "{:o}\0", stage.map_or(0, |stage| stage.mode))?;
+        }
+        for stage in path.stages.iter().flatten() {
+            entries.write_all(stage.id.as_bytes())?;
+        }
+    }
+    let size = u32::try_from(entries.len())
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "resolve-undo extension exceeds 4GB"))?;
+    out.write_all(&SIGNATURE)?;
+    out.write_all(&size.to_be_bytes())?;
+    out.write_all(&entries)
+}
+
+#[cfg(test)]
+mod tests;

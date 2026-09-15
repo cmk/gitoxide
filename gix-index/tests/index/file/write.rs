@@ -89,6 +89,34 @@ fn skip_hash() -> crate::Result {
 }
 
 #[test]
+fn resolve_undo_survives_default_write() -> crate::Result {
+    let expected = Loose("REUC").open();
+    let mut actual_bytes = Vec::new();
+    expected.write_to(&mut actual_bytes, Default::default())?;
+    let (actual, _) = State::from_bytes(&actual_bytes, FileTime::now(), gix_hash::Kind::Sha1, Default::default())?;
+    assert_eq!(
+        actual.resolve_undo().map(Vec::len),
+        expected.resolve_undo().map(Vec::len),
+        "default serialization must retain native Git's resolve-undo records"
+    );
+    let expected_bytes = std::fs::read(Loose("REUC").to_path())?;
+    let mut entries_only = Vec::new();
+    expected.write_to(&mut entries_only, options_with(write::Extensions::None))?;
+    let offset = entries_only.len() - gix_hash::Kind::Sha1.len_in_bytes();
+    let resolve_undo = |bytes: &[u8]| {
+        extension::Iter::new_without_checksum(&bytes[offset..], gix_hash::Kind::Sha1)
+            .expect("complete index with trailing checksum")
+            .find_map(|(signature, data)| (signature == *b"REUC").then(|| data.to_vec()))
+    };
+    assert_eq!(
+        resolve_undo(&actual_bytes),
+        resolve_undo(&expected_bytes),
+        "REUC payload must match native Git byte for byte"
+    );
+    Ok(())
+}
+
+#[test]
 fn roundtrips_sparse_index() -> crate::Result {
     // NOTE: I initially tried putting these fixtures into the main roundtrip test above,
     // but the call to `compare_raw_bytes` panics. It seems like git is using a different

@@ -122,6 +122,14 @@ impl State {
                     .and_then(|signature| self.tree().map(|tree| tree.write_to(write).map(|_| signature)))
             },
             &|write| {
+                extensions
+                    .should_write(extension::resolve_undo::SIGNATURE)
+                    .and_then(|signature| {
+                        self.resolve_undo()
+                            .map(|paths| extension::resolve_undo::write_to(paths, write).map(|_| signature))
+                    })
+            },
+            &|write| {
                 self.is_sparse()
                     .then(|| extension::sparse::write_to(write).map(|_| extension::sparse::SIGNATURE))
             },

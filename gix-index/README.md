@@ -1,4 +1,7 @@
 
+Default index writes preserve decoded resolve-undo (`REUC`) records, including missing conflict stages.
+`Extensions::None` and `Extensions::Given` omit resolve-undo; use the default `Extensions::All` to retain it.
+
 #### Test fixtures
 
 Most of the test indices are snatched directly from the unit test suite of `git` itself, usually by running something like the following
