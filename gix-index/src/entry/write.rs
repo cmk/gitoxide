@@ -1,8 +1,17 @@
 use crate::{Entry, State, entry};
 
 impl Entry {
-    /// Serialize ourselves to `out` with path access via `state`, without padding.
-    pub fn write_to(&self, mut out: impl std::io::Write, state: &State) -> std::io::Result<()> {
+    /// Serialize ourselves in V2/V3 form to `out` with path access via `state`, without padding.
+    pub fn write_to(&self, out: impl std::io::Write, state: &State) -> std::io::Result<()> {
+        self.write_with_previous_path(out, state, None)
+    }
+
+    pub(crate) fn write_with_previous_path(
+        &self,
+        mut out: impl std::io::Write,
+        state: &State,
+        previous: Option<&[u8]>,
+    ) -> std::io::Result<()> {
         let stat = self.stat;
         out.write_all(&stat.ctime.secs.to_be_bytes())?;
         out.write_all(&stat.ctime.nsecs.to_be_bytes())?;
@@ -31,7 +40,22 @@ impl Entry {
                     .to_be_bytes(),
             )?;
         }
-        out.write_all(path)?;
+        if let Some(previous) = previous {
+            let common = previous.iter().zip(path.iter()).take_while(|(a, b)| a == b).count();
+            let mut strip = previous.len() - common;
+            let mut encoded = [0u8; 10];
+            let mut start = encoded.len() - 1;
+            encoded[start] = (strip & 0x7f) as u8;
+            while strip > 0x7f {
+                strip = (strip >> 7) - 1;
+                start -= 1;
+                encoded[start] = 0x80 | (strip & 0x7f) as u8;
+            }
+            out.write_all(&encoded[start..])?;
+            out.write_all(&path[common..])?;
+        } else {
+            out.write_all(path)?;
+        }
         out.write_all(b"\0")
     }
 }

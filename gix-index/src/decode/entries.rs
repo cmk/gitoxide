@@ -51,7 +51,7 @@ const fn min_entry_size_in_bytes(object_hash: gix_hash::Kind, version: Version) 
 /// Compute an upper bound for how many entries can physically fit into the on-disk entries block.
 ///
 /// The entries block is the index payload after the header and before extensions or, if there are no
-/// extensions, before the trailing checksum. We divide that byte budget by [`min_entry_size_in_bytes()`]
+/// extensions, before the trailing checksum. We divide that byte budget by the minimum encoded entry size
 /// to obtain the largest plausible entry count for the declared index version. This is intentionally a
 /// coarse upper bound used to reject corrupt headers that claim more entries than the remaining bytes
 /// could possibly encode.

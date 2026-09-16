@@ -3,8 +3,11 @@ use filetime::FileTime;
 use crate::{Entry, State, Version, entry, extension};
 
 mod entries;
+pub use entries::max_entries_possible;
 ///
 pub mod header;
+#[cfg(test)]
+mod tests;
 
 mod error {
     use crate::{decode, extension};
@@ -59,9 +62,15 @@ pub struct Options {
     /// We will abort reading this file if it doesn't match.
     pub expected_checksum: Option<gix_hash::ObjectId>,
     /// Configure the maximum size of a single allocation caused by untrusted on-disk index data.
+    /// The entry-vector allocation can be overridden with `entry_alloc_limit_bytes`.
     ///
     /// Use `None` to disable the limit, which is also the default.
     pub alloc_limit_bytes: Option<usize>,
+    /// Override `alloc_limit_bytes` for the decoded entry vector only.
+    ///
+    /// Decoded entries may be larger than their encoded records. `None` uses
+    /// `alloc_limit_bytes`; path and extension allocations always use that original limit.
+    pub entry_alloc_limit_bytes: Option<usize>,
 }
 
 impl State {
@@ -76,6 +85,7 @@ impl State {
             min_extension_block_in_bytes_for_threading,
             expected_checksum,
             alloc_limit_bytes,
+            entry_alloc_limit_bytes,
         }: Options,
     ) -> Result<(Self, Option<gix_hash::ObjectId>), Error> {
         let _span = gix_features::trace::detail!("gix_index::State::from_bytes()", options = ?_options);
@@ -97,7 +107,7 @@ impl State {
             (num_entries as usize)
                 .checked_mul(std::mem::size_of::<Entry>())
                 .ok_or(Error::OutOfMemory)?,
-            alloc_limit_bytes,
+            entry_alloc_limit_bytes.or(alloc_limit_bytes),
         )?;
         ensure_in_alloc_limit(path_backing_buffer_size, alloc_limit_bytes)?;
 

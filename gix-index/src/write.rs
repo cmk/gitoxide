@@ -2,6 +2,9 @@ use std::io::Write;
 
 use crate::{State, Version, entry, extension, write::util::CountBytes};
 
+#[cfg(test)]
+mod tests;
+
 /// A way to specify which of the optional extensions to write.
 #[derive(Default, Debug, Copy, Clone)]
 pub enum Extensions {
@@ -45,7 +48,7 @@ impl Extensions {
 
 /// The options for use when [writing an index][State::write_to()].
 ///
-/// Note that default options write either index V2 or V3 depending on the content of the entries.
+/// Writes V4 for a decoded V4 index; otherwise selects V2 or V3 as required by the entries.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Options {
     /// Configures which extensions to write.
@@ -151,6 +154,9 @@ impl State {
 
 impl State {
     fn detect_required_version(&self) -> Version {
+        if self.version == Version::V4 {
+            return Version::V4;
+        }
         self.entries
             .iter()
             .find_map(|e| e.flags.contains(entry::Flags::EXTENDED).then_some(Version::V3))
@@ -177,8 +183,14 @@ fn header<T: std::io::Write>(
 }
 
 fn entries<T: std::io::Write>(out: &mut CountBytes<T>, state: &State, header_size: u32) -> Result<u32, std::io::Error> {
+    let mut previous = (state.version == Version::V4).then_some(&[][..]);
     for entry in state.entries() {
         if entry.flags.contains(entry::Flags::REMOVE) {
+            continue;
+        }
+        if let Some(previous_path) = previous {
+            entry.write_with_previous_path(&mut *out, state, Some(previous_path))?;
+            previous = Some(entry.path(state));
             continue;
         }
         entry.write_to(&mut *out, state)?;

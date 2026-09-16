@@ -1,6 +1,8 @@
 
 Default index writes preserve decoded resolve-undo (`REUC`) records, including missing conflict stages.
 `Extensions::None` and `Extensions::Given` omit resolve-undo; use the default `Extensions::All` to retain it.
+Decoded V4 indexes retain prefix compression when written. Decoding can budget the entry vector
+separately with `entry_alloc_limit_bytes`, without relaxing the path or extension allocation limits.
 
 #### Test fixtures
 

@@ -44,6 +44,7 @@ impl crate::Repository {
                 min_extension_block_in_bytes_for_threading: 0,
                 expected_checksum: None,
                 alloc_limit_bytes: self.config.alloc_limit_bytes,
+                entry_alloc_limit_bytes: None,
             },
         )?;
 
