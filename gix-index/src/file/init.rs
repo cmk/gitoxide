@@ -64,20 +64,27 @@ impl File {
             #[expect(unsafe_code)]
             let data = unsafe { memmap2::MmapOptions::new().map_copy_read_only(&file)? };
 
+            let hash_len = object_hash.len_in_bytes();
+            if data.len() < decode::header::SIZE + hash_len {
+                return Err(decode::Error::UnexpectedTrailerLength {
+                    expected: hash_len,
+                    actual: data.len().saturating_sub(decode::header::SIZE),
+                }
+                .into());
+            }
+            let checksum_offset = data.len() - hash_len;
+
             if !skip_hash {
                 // Note that even though it's trivial to offload this into a thread, which is worth it for all but the smallest
                 // index files, we choose more safety here just like git does and don't even try to decode the index if the hashes
                 // don't match.
                 // Thanks to `skip_hash`, we can get performance and it's under caller control, at the cost of some safety.
-                let expected =
-                    gix_hash::ObjectId::from_bytes_or_panic(&data[data.len() - object_hash.len_in_bytes()..]);
+                let expected = gix_hash::ObjectId::from_bytes_or_panic(&data[checksum_offset..]);
                 if !expected.is_null() {
                     let _span = gix_features::trace::detail!("gix::open_index::hash_index", path = ?path);
-                    let meta = file.metadata()?;
-                    let num_bytes_to_hash = meta.len() - object_hash.len_in_bytes() as u64;
                     gix_hash::bytes(
                         &mut file,
-                        num_bytes_to_hash,
+                        checksum_offset as u64,
                         object_hash,
                         &mut gix_features::progress::Discard,
                         &Default::default(),
