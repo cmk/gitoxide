@@ -235,12 +235,10 @@ pub(crate) mod function {
                     let mut next = if negated { p.next() } else { Some((p_idx, p_ch)) };
                     let mut prev_p_ch = 0;
                     let mut matched = false;
-                    let mut p_idx_ofs = 0;
                     loop {
-                        let Some((mut p_idx, mut p_ch)) = next else {
+                        let Some((p_idx, mut p_ch)) = next else {
                             return AbortAll;
                         };
-                        p_idx += p_idx_ofs;
                         match p_ch {
                             BACKSLASH => match p.next() {
                                 Some((_, p_ch)) => {
@@ -278,11 +276,16 @@ pub(crate) mod function {
                                 prev_p_ch = 0;
                             }
                             BRACKET_OPEN if matches!(p.peek(), Some((_, COLON))) => {
-                                p.next();
-                                while p.peek().is_some_and(|t| t.1 != BRACKET_CLOSE) {
-                                    p.next();
+                                // Look ahead without changing the enclosing class iterator.
+                                // If the POSIX delimiter is malformed, '[' is literal and
+                                // the following ':' remains the next member. Restarting an
+                                // enumerated slice here would lose the pattern coordinates.
+                                let mut class_end = p.clone();
+                                class_end.next();
+                                while class_end.peek().is_some_and(|t| t.1 != BRACKET_CLOSE) {
+                                    class_end.next();
                                 }
-                                let closing_bracket_idx = match p.next() {
+                                let closing_bracket_idx = match class_end.next() {
                                     Some((idx, _)) => idx,
                                     None => return AbortAll,
                                 };
@@ -293,12 +296,9 @@ pub(crate) mod function {
                                     if t_ch == BRACKET_OPEN {
                                         matched = true;
                                     }
-                                    if p_idx > pattern.len() {
-                                        return AbortAll;
-                                    }
-                                    p = pattern[p_idx..].iter().map(possibly_lowercase).enumerate().peekable();
-                                    p_idx_ofs += p_idx;
+                                    prev_p_ch = BRACKET_OPEN;
                                 } else {
+                                    p = class_end;
                                     let class = &pattern.as_bytes()[p_idx + 2..closing_bracket_idx - 1];
                                     match class {
                                         b"alnum" => {

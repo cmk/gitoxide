@@ -7,6 +7,84 @@ use bstr::ByteSlice;
 use gix_glob::{Pattern, pattern::Case, wildmatch};
 
 #[test]
+fn malformed_posix_classes_retain_suffix_and_pattern_coordinates() {
+    // Literal prefixes and recursive wildcard frames must interpret the same
+    // bracket bytes identically. A malformed POSIX opener is a literal '[';
+    // the first ']' still closes the enclosing class, leaving the suffix live.
+    for (prefix, text_prefix) in [
+        ("", ""),
+        ("p", "p"),
+        ("pp", "pp"),
+        ("*", "p"),
+        ("*p", "qp"),
+        ("p/*", "p/"),
+        ("p/**/", "p/"),
+        ("p/**/", "p/q/"),
+    ] {
+        for (class, members) in [
+            ("[:alpha", "[:alpha"),
+            (
+                "[:alpha:][:alpha",
+                "[:abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            ),
+            ("[:digit:][:broken", "[:broken0123456789"),
+            ("[:", "[:"),
+        ] {
+            for suffix in ["", "-z]", "x]"] {
+                for negated in [false, true] {
+                    let pattern = format!("{prefix}[{}{class}]{suffix}", if negated { "!" } else { "" });
+                    for byte in b' '..=b'~' {
+                        for mode in [
+                            wildmatch::Mode::empty(),
+                            wildmatch::Mode::NO_MATCH_SLASH_LITERAL,
+                            wildmatch::Mode::IGNORE_CASE,
+                            wildmatch::Mode::NO_MATCH_SLASH_LITERAL | wildmatch::Mode::IGNORE_CASE,
+                        ] {
+                            // Only path mode gives a boundary **/ its zero-directory shortcut.
+                            if prefix == "p/**/"
+                                && text_prefix == "p/"
+                                && !mode.contains(wildmatch::Mode::NO_MATCH_SLASH_LITERAL)
+                            {
+                                continue;
+                            }
+                            let candidate = if mode.contains(wildmatch::Mode::IGNORE_CASE) {
+                                byte.to_ascii_lowercase()
+                            } else {
+                                byte
+                            };
+                            let expected = members.as_bytes().contains(&candidate) != negated
+                                && !(byte == b'/' && mode.contains(wildmatch::Mode::NO_MATCH_SLASH_LITERAL));
+                            let text = format!("{text_prefix}{}{suffix}", char::from(byte));
+                            assert_eq!(
+                                wildmatch(pattern.as_bytes().as_bstr(), text.as_bytes().as_bstr(), mode),
+                                expected,
+                                "{pattern:?} against {text:?} in {mode:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (pattern, text) in [
+        ("[[:alpha:][:alpha]-z]", "a"),
+        ("p[[:alpha:][:alpha]-z]", "pa"),
+        ("*[[:alpha:][:alpha]-z]", "pa"),
+        ("p/**/[[:alpha:][:alpha]-z]", "p/a"),
+        ("p/**/[[:alpha:][:alpha]-z]", "p/q/a"),
+    ] {
+        assert!(
+            !wildmatch(
+                pattern.as_bytes().as_bstr(),
+                text.as_bytes().as_bstr(),
+                wildmatch::Mode::NO_MATCH_SLASH_LITERAL
+            ),
+            "a malformed class must not discard the remaining suffix: {pattern:?} against {text:?}"
+        );
+    }
+}
+
+#[test]
 fn corpus() {
     // based on git/t/t3070.sh
     let tests = [
