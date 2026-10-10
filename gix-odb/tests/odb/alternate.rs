@@ -50,6 +50,36 @@ fn alternate_with_content(
 }
 
 #[test]
+fn nested_relative_alternates_resolve_from_the_declaring_object_directory() -> crate::Result {
+    use gix_object::{Find as _, Write as _};
+
+    let tmp = gix_testtools::tempfile::TempDir::new()?;
+    let root = tmp.path();
+    let (a, b) = alternate(root.join("a/objects"), root.join("storage/b/objects"))?;
+    let c = root.join("storage/c/objects");
+    alternate_with_content(&b, &c, b"../../c/objects\n".to_vec(), None)?;
+    assert!(
+        !a.join("../../c/objects").exists(),
+        "the path relative to A must not accidentally provide C's objects"
+    );
+
+    let payload = b"available only in the nested alternate\n";
+    let id = gix_odb::at(&c)?.write_buf(gix_object::Kind::Blob, payload)?;
+    let actual_paths = alternate::resolve(a.clone(), &std::env::current_dir()?)?
+        .into_iter()
+        .map(fs::canonicalize)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(actual_paths, vec![fs::canonicalize(b)?, fs::canonicalize(c)?]);
+
+    let mut buffer = Vec::new();
+    let store = gix_odb::at(a)?;
+    let object = store.try_find(&id, &mut buffer)?.expect("C owns the requested blob");
+    assert_eq!(object.kind, gix_object::Kind::Blob);
+    assert_eq!(object.data, payload);
+    Ok(())
+}
+
+#[test]
 fn circular_alternates_are_detected_with_relative_paths() -> crate::Result {
     let tmp = gix_testtools::tempfile::TempDir::new()?;
     let tmp = tmp.path().join("sub-dir");

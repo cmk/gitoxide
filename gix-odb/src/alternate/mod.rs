@@ -44,7 +44,7 @@ pub enum Error {
 /// An object directory that was resolved before is skipped, and it is an error if an alternate points back
 /// into the chain of directories that is currently being followed, as that would form a cycle.
 pub fn resolve(objects_directory: PathBuf, current_dir: &std::path::Path) -> Result<Vec<PathBuf>, Error> {
-    let mut dirs = vec![(None, objects_directory.clone())];
+    let mut dirs = vec![(None, objects_directory)];
     let mut out = Vec::new();
     let mut seen = Vec::new();
     while let Some((parent_idx, dir)) = dirs.pop() {
@@ -68,7 +68,7 @@ pub fn resolve(objects_directory: PathBuf, current_dir: &std::path::Path) -> Res
         match fs::read(dir.join("info").join("alternates")) {
             Ok(input) => {
                 for path in parse::content(&input)?.into_iter().rev() {
-                    dirs.push((Some(idx), objects_directory.join(path)));
+                    dirs.push((Some(idx), dir.join(path)));
                 }
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
